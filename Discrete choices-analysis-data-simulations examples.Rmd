@@ -1,0 +1,563 @@
+---
+title: "Conjoint analysis data simulations V1"
+author: "Constanza Avalos"
+date: "2023-08-25"
+output:
+  html_document:
+    theme: cerulean
+    toc: yes
+    toc_float: yes
+  pdf_document:
+    toc: yes
+---
+
+This is a file for the paper: Food labeling. An experiment to assess consumer choices. Specifically, this is an R Markdown document for the Conjoint analysis data simulations, that contain the coding and explanations to create a simulated data based on a choice-based analysis. 
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+## Define the attributes and levels
+
+We define the attributes and levels of choices.How much servings are in a box of cereal? 12, so a person need at least 3.5 boxes monthly to eat cereal daily. 10% of difference, why 4 prices. 
+
+```{r attributes}
+
+library(pander) # translate output to HTML / latex
+library(magrittr) # use the pipe operator %>%
+library(knitr) #  function formats tables
+
+attrib <- list (cereal_label = c("Low", "Medium", "High"), 
+                payment = c("Monthly", "Weekly"),
+                quantity = c("1", "3", "5"),
+                price = c("2.75", "3", "3.25"))
+
+attrib
+
+```
+
+## Concatenation values
+
+We concatenate the values
+
+```{r conca, echo=FALSE}
+coef.names <- NULL
+for (a in seq_along(attrib)) {
+    coef.names <- c(coef.names, 
+                    paste(names(attrib) [a], attrib[[a]] [-1], sep = ""))
+}
+
+coef.names
+```
+
+## Part worth in the population generation. 
+
+Assumption: multivariate normal distribution in the population with a covariance matrix sigma. Correlation between the part worth for quantity5 and 3, so participants have a stronger relationship for 5 and 3, and viceversa. 
+
+```{r part worth, echo=FALSE}
+mu <- c(-1, -1, 0.5, -1, -2, -1, -2) 
+names(mu) <- coef.names
+mu
+
+Sigma <- diag(c(0.1, 0.5, 0.1, 0.2, 1, 0.5, 1))
+dimnames(Sigma) <- list(coef.names, coef.names)
+Sigma["quantity3", "quantity5"] <- Sigma["quantity5", "quantity3"] <- 0.3 
+
+```
+## Shared cereals
+
+We create a vector of respondent IDs for the 1000 respondents (resp.id) and a factor variable indicating whether each respondent intends to share the cereal package (cerealpool). 
+
+```{r shared, echo=FALSE}
+set.seed(33040)
+resp.id <- 1:1000 # respondent ids
+cerealpool <- sample(c("yes", "no"), size = length(resp.id), replace = TRUE,
+                     prob = c( 0.3, 0.7))
+library(MASS)
+coefs <- mvrnorm(length(resp.id), mu=mu, Sigma=Sigma)
+colnames(coefs) <- coef.names
+
+coefs[cerealpool=="yes", "quantity5"] <- coefs[cerealpool=="yes", "quantity5"] + 2
+coefs[cerealpool=="yes", "quantity3"] <- coefs[cerealpool=="yes", "quantity3"] + 1.5
+dput(head(cerealpool))
+```
+
+## Data set vectors
+
+15 choices tasks and 3 alternatives, plus none option. All possible cereals profiles, 48 = 4x3x4
+
+```{r vectors, echo=FALSE}
+nques <- 5 #number of questions
+nalt <- 3 #number of alternatives
+
+profiles <- expand.grid(attrib)
+nrow(profiles)
+head(profiles)
+
+profiles.coded <- model.matrix(~ cereal_label + payment + quantity + price, data = profiles) [ , -1]
+head(profiles.coded)
+```
+
+## Data set simulations
+
+```{r data}
+
+cbc.df <- data.frame(NULL)
+for (i in seq_along(resp.id)) {
+  profiles.i <- sample(1:nrow(profiles), size = nques*nalt)
+  utility <- profiles.coded[profiles.i, ] %*% coefs [i, ]
+  wide.util <- matrix(data = utility, ncol = nalt, byrow = TRUE)
+  probs <- exp(wide.util) / rowSums(exp(wide.util))
+  choice <- apply(probs, 1, function(x) sample(1:nalt, size = 1, prob = x))
+  choice <- rep(choice, each = nalt) ==rep(1:nalt, nques)
+  conjoint.i <- data.frame(resp.id = rep(i, nques), 
+                           ques = rep(1:nques, each= nalt), 
+                           alt = rep(1:nalt, nques), 
+                           cerealpool = rep(cerealpool[i], nques), 
+                           profiles[profiles.i, ], 
+                           choice = as.numeric(choice))
+  cbc.df <- rbind(cbc.df, conjoint.i)
+}
+#Tidy up, keeping cbc.df and attrib
+rm(a, i, resp.id, cerealpool, mu, Sigma, coefs, coef.names,
+     conjoint.i, profiles, profiles.i, profiles.coded, utility,
+     wide.util, probs, choice, nalt, nques)
+
+head(cbc.df)
+```
+
+## Adding treatment groups and sociodemographic variables 
+
+For example:
+
+```{r treat, echo=FALSE}
+
+cbc.df$gender <- sample(c("Male", "Female", "Iprefernottosay" ), nrow(cbc.df), replace = TRUE) 
+cbc.df$Age <- sample(c("18-24", "25-34", "35-44", "45-54", "55-64", "65 and over", "Iprefernottosay"), nrow(cbc.df), replace = TRUE) 
+cbc.df$Ethnicity <- sample(c(1, 2, 3, 4, 5, 6), nrow(cbc.df), replace = TRUE) 
+cbc.df$Edu_level <- sample(c(9, 8, 7, 6, 5, 4, 3, 2, 1), nrow(cbc.df), replace = TRUE) 
+cbc.df$House_income <- sample(c("I prefer not to say", "Above £40,000", "£30,001 - £40,000", "£20,001 - £30,000", "£10,001 -£20,000", "Below £10,000"), nrow(cbc.df), replace = TRUE)
+cbc.df$raven <- abs(round(rnorm(nrow(cbc.df), mean = 30, sd = 10), 2))
+#cbc.df$resp_time <- abs(round(rnorm(nrow(cbc.df), mean = 10, sd = 0.5), 2))
+#cbc.df$raven <- pmin(60, cbc.df$raven) #values from 0 to 60
+
+summary(cbc.df) %>% pander
+
+```
+
+## Inspecting choice data
+
+You can also embed plots, for example:
+
+```{r summary, echo=FALSE}
+
+xtabs(choice ~ cereal_label, data = cbc.df)
+xtabs(choice ~ quantity, data = cbc.df)
+xtabs(choice ~ price, data = cbc.df)
+xtabs(choice ~ treatment_group, data = cbc.df)
+
+prop.table(table(cbc.df$gender, cbc.df$treatment_group))  %>% pander
+prop.table(table(cbc.df$Age, cbc.df$treatment_group))  %>% pander
+#prop.table(table(cbc.df$House_income, cbc.df$treatment_group))  %>% pander
+prop.table(table(cbc.df$Edu_level, cbc.df$treatment_group))  %>% pander
+mean1 <- aggregate(Age ~ treatment_group, cbc.df, mean)
+print(mean1)  %>% pander
+mean2 <- aggregate(raven ~ treatment_group, cbc.df, mean)
+print(mean2)  %>% pander
+
+#test statistics
+
+
+datamer <- data.frame("Female" = c(cbc.df, cbc.df2), group = c(rep(cbc.df, "Female"), rep(cbc.df2, "Female")))
+
+prop.table(table(cbc.df$Age))  %>% pander
+prop.table(table(cbc.df2$Age))  %>% pander
+
+t.rav <- t.test(cbc.df$raven, cbc.df2$raven, var.equal = TRUE)
+t.rav%>% pander
+
+
+```
+
+## Fitting choice models with multinomial logit analysis mlogit()
+
+There are 3 ways. 
+
+```{r message=FALSE, results='asis'}
+#First way
+library(devtools)
+library(mlogit)
+library(dfidx)      # install if needed and add a column with unique question numbers, as needed in mlogit 1.1+
+cbc.df$chid <- rep(1:(nrow(cbc.df)/3), each=3)
+cbc.mlogit <- dfidx(cbc.df, choice="choice", idx=list(c("chid", "resp.id"), "alt" )) # shape the data for mlogit
+
+m1 <- mlogit(choice ~ 0 + cereal_label + quantity + price, data = cbc.mlogit)
+summary(m1) 
+
+m2 <- mlogit(choice ~ 0 + cereal_label + quantity + price, data = cbc.mlogit)
+summary(m2) 
+
+mcontrol <- mlogit(choice ~ 0 + cereal_label + payment + quantity + price, data = cbc.mlogit)
+summary(mcontrol) 
+
+#lrtest(m1, m2, m3)
+
+#Second way 
+
+library(survival)
+
+m4 <- coxph(Surv(resp.id, choice) ~ cereal_label + quantity + price, data = cbc.df, 
+            ties = "breslow")
+summary(m4) #no me da lo mismo que m1
+
+
+#predict(m4) #probability of choice
+#exp_p <- cbind(cbc.df$alt, data.frame(exp(predict(m4)))) [1:75,]
+#View(exp_p)
+#names(exp_p)[1] <- "Alt"
+#names(exp_p)[2] <- "Exp"
+#exp_p$prob <- exp_p$Exp / sum(exp_p$Exp)
+#exp_p[c(order(-exp_p$prob)),]
+
+cbc.df[cbc.df == "Low"] <- 285
+```
+
+
+```{r message=FALSE, results='asis'}
+cbc.df[cbc.df == "Medium"] <- 315
+cbc.df[cbc.df == "High"] <- 410
+
+```
+
+## Willingness-to-pay
+
+We define the attributes and levels of choices.
+
+```{r willing, echo=FALSE}
+
+coef(m1) ["cereal_labelHighTL"]/(-coef(m1) ["as.numeric(as.character(price))"] / 1000)
+coef(m1) ["cereal_labelMediumTL"]/(-coef(m1) ["as.numeric(as.character(price))"] / 1000)
+coef(m1) ["quantity5"]/(-coef(m1) ["as.numeric(as.character(price))"] / 1000)
+coef(m1) ["quantity3"]/(-coef(m1) ["as.numeric(as.character(price))"] / 1000)
+
+```
+## Simulating choice shares
+
+We define the attributes and levels of choices.
+
+```{r shares, echo=FALSE}
+
+predict.mnl <- function(model, data) {
+  data.model <- model.matrix(update(model$formula, 0 ~ .), data = data) [, -1]
+  utility <- data.model %*% model$coef
+  share <- exp(utility) / sum(exp(utility))
+  cbind(share, data)
+}
+
+(new.data <- expand.grid(attrib) [c(8, 1, 3, 41, 49, 26), ])
+predict.mnl(m2, new.data)
+
+sensitivity.mnl <- function(model, attrib, base.data, competitor.data) {
+  data <- rbind(base.data, competitor.data)
+  base.share <- predict.mnl(model, data) [1,1]
+  share <- NULL
+  for (a in seq_along(attrib)) {
+    for (i in attrib[[a]]) {
+      data[1,] <- base.data
+      data[1,a] <- i
+      share <- c(share, predict.mnl(model, data)[1,1])
+    }
+  }
+  data.frame(level=unlist(attrib), share=share, increase=share-base.share)
+}
+
+base.data <- expand.grid(attrib)[c(8), ]
+competitor.data <- expand.grid(attrib)[c(1, 3, 41, 49, 26), ]
+(tradeoff <- sensitivity.mnl(m1, attrib, base.data, competitor.data))
+barplot(tradeoff$increase, horiz=FALSE, names.arg=tradeoff$level,
+ylab="Change in Share for Baseline Product")
+
+```
+## Define the attributes and levels v2
+
+We define the attributes and levels of choices. How much servings are in a box of cereal? 12, so a person need at least 3.5 boxes monthly to eat cereal daily. 10% of difference, why 4 prices. 
+
+```{r attributes2}
+
+library(pander) # translate output to HTML / latex
+library(magrittr) # use the pipe operator %>%
+library(knitr) # kable function formats tables
+
+attrib2 <- list (cereal_label = c("LowGS", "MediumGS", "HighGS"), 
+                payment = c("Monthly", "Weekly"),
+                quantity = c("1", "3", "5"),
+                price = c("2.75", "3", "3.25")) 
+
+attrib2
+
+```
+## Concatenation values
+
+We concatenate the values
+
+```{r conca2, echo=FALSE}
+coef.names <- NULL
+for (a in seq_along(attrib2)) {
+    coef.names <- c(coef.names, 
+                    paste(names(attrib2) [a], attrib2[[a]] [-1], sep = ""))
+}
+
+coef.names
+```
+## Part worth in the population generation. 
+
+Assumption: multivariate normal distribution in the population with a covariance matrix sigma. Correlation between the part worth for quantity5 and 3, so participants have a stronger relationship for 5 and 3, and viceversa. 
+
+```{r part worth2, echo=FALSE}
+mu1 <- c(-1, -1, 0.5, -1, -2, -1, -2) 
+names(mu1) <- coef.names
+mu1
+
+Sigma1 <- diag(c(0.1, 0.5, 0.1, 0.2, 1, 0.5, 1))
+dimnames(Sigma1) <- list(coef.names, coef.names)
+Sigma1["quantity3", "quantity5"] <- Sigma1["quantity5", "quantity3"] <- 0.3 
+
+```
+## Shared cereals
+
+We create a vector of respondent IDs for the 1000 respondents (resp.id) and a factor variable indicating whether each respondent intends to share the cereal package (cerealpool). 
+
+```{r shared2, echo=FALSE}
+
+set.seed(33040)
+resp.id1 <- 1:1000 # respondent ids
+cerealpool1 <- sample(c("yes", "no"), size = length(resp.id1), replace = TRUE,
+                     prob = c( 0.7, 0.3))
+library(MASS)
+coefs1 <- mvrnorm(length(resp.id1), mu=mu1, Sigma=Sigma1)
+colnames(coefs1) <- coef.names
+
+coefs1[cerealpool1=="yes", "quantity5"] <- coefs1[cerealpool1=="yes", "quantity5"] + 1
+coefs1[cerealpool1=="yes", "quantity3"] <- coefs1[cerealpool1=="yes", "quantity3"] + 0.5
+dput(head(cerealpool1))
+```
+## Data set vectors
+
+5 choices tasks and 3 alternatives, plus none option. 
+
+```{r vectors2, echo=FALSE}
+nques2 <- 5 #number of questions
+nalt2 <- 3 #number of alternatives
+
+profiles2 <- expand.grid(attrib2)
+nrow(profiles2)
+head(profiles2)
+
+profiles.coded2 <- model.matrix(~ cereal_label + payment + quantity + price, data = profiles2) [ , -1]
+head(profiles.coded2)
+```
+## Data set simulations
+
+```{r data2}
+
+cbc.df2 <- data.frame(NULL)
+for (i in seq_along(resp.id1)) {
+  profiles.i2 <- sample(1:nrow(profiles2), size = nques2*nalt2)
+  utility2 <- profiles.coded2[profiles.i2, ] %*% coefs1 [i, ]
+  wide.util2 <- matrix(data = utility2, ncol = nalt2, byrow = TRUE)
+  probs2 <- exp(wide.util2) / rowSums(exp(wide.util2))
+  choice2 <- apply(probs2, 1, function(x) sample(1:nalt2, size = 1, prob = x))
+  choice2 <- rep(choice2, each = nalt2) ==rep(1:nalt2, nques2)
+  conjoint.i2 <- data.frame(resp.id1 = rep(i, nques2), 
+                           ques2 = rep(1:nques2, each= nalt2), 
+                           alt2 = rep(1:nalt2, nques2), 
+                           cerealpool1 = rep(cerealpool1[i], nques2), 
+                           profiles2[profiles.i2, ], 
+                           choice2 = as.numeric(choice2))
+  cbc.df2 <- rbind(cbc.df2, conjoint.i2)
+}
+#Tidy up, keeping cbc.df and attrib
+rm(a, i, resp.id1, cerealpool1, mu1, Sigma1, coefs1, coef.names,
+     conjoint.i2, profiles2, profiles.i2, profiles.coded2, utility2,
+     wide.util2, probs2, choice2, nalt2, nques2)
+
+head(cbc.df2)
+```
+## Fitting choice models with multinomial logit analysis mlogit()
+
+There are 3 ways. 
+
+```{r message2=FALSE, results='asis'}
+
+cbc.df2$gender <- sample(c("Male", "Female", "Iprefernottosay" ), nrow(cbc.df2), replace = TRUE) 
+cbc.df2$Age <- sample(c("18-24", "25-34", "35-44", "45-54", "55-64", "65 and over", "Iprefernottosay"), nrow(cbc.df2), replace = TRUE) 
+cbc.df2$raven <- abs(round(rnorm(nrow(cbc.df2), mean = 32, sd = 10), 2))
+
+
+
+#First way
+library(devtools)
+library(mlogit)
+library(dfidx)      # install if needed and add a column with unique question numbers, as needed in mlogit 1.1+
+cbc.df2$chid <- rep(1:(nrow(cbc.df2)/3), each=3)
+cbc.mlogit2 <- dfidx(cbc.df2, choice="choice2", idx=list(c("chid", "resp.id1"), "alt2" )) # shape the data for mlogit
+
+m1a <- mlogit(choice2 ~ 0 + cereal_label + quantity + price, data = cbc.mlogit2)
+summary(m1a) 
+
+
+library(stargazer)
+stargazer(m1, m1a, type = "html", 
+        title = "Table 2. Estimation results of Model 1 (TL) and Model 2 (GS) —predicting product choice")
+
+predict.mnl1 <- function(model, data) {
+  data.model1 <- model.matrix(update(model$formula, 0 ~ .), data = data) [, -1]
+  utility1 <- data.model1 %*% model$coef
+  share <- exp(utility1) / sum(exp(utility1))
+  cbind(share, data)
+}
+
+(new.data1 <- expand.grid(attrib2) [c(8, 1, 3, 41, 49, 26), ])
+predict.mnl1(m1, new.data)
+
+sensitivity.mnl1 <- function(model, attrib2, base.data, competitor.data) {
+  data1 <- rbind(base.data, competitor.data)
+  base.share1 <- predict.mnl1(model, data) [1,1]
+  share <- NULL
+  for (a in seq_along(attrib2)) {
+    for (i in attrib2[[a]]) {
+      data[1,] <- base.data
+      data[1,a] <- i
+      share <- c(share, predict.mnl1(model, data)[1,1])
+    }
+  }
+  data.frame(level=unlist(attrib2), share=share, increase=share-base.share)
+}
+
+base.data <- expand.grid(attrib2)[c(8), ]
+competitor.data <- expand.grid(attrib2)[c(1, 3, 41, 49, 26), ]
+(tradeoff <- sensitivity.mnl(m1, attrib, base.data, competitor.data))
+barplot(tradeoff$increase, horiz=FALSE, names.arg=tradeoff$level,
+ylab="Change in Share for Baseline Product")
+
+
+```
+
+
+
+## Fitting choice model with Hierarchical Linear Model lme4
+
+The linear model choice.lm has only fixed effects that are estimated at the sample level. In an HLM, we add one or more individual-level effects to those.
+
+The simplest HLM allows individuals to vary only in terms of the constant intercept. For example, we might expect that individuals vary in their usage of a choices scale such that some will rate our roller coaster designs higher or lower than the average respondent. This would be an individual-level random effect for the intercept term.
+
+To estimate an HLM with fixed effects plus a per-respondent intercept, we change the lm() model from above in three ways. First, instead of lm(), we use a hierarchical estimation function, lmer() from the lme4 package.
+
+Second, in the formula for lmer(), we specify the term(s) for which to estimate random effects. For the intercept, that is signified as simply “1”. Third, we specify the grouping variable, for which a random effect will be estimated for each unique group. In our conjoint data, the group in the set of responses for a single respondent, which is identified in the data frame by respondent number, resp.id. With lme4, we specify the random effect and grouping variable with syntax using a vertical bar (“|”) as + (predictors | group), or in this case for the intercept only, +(1 | resp.id).
+
+We estimate this model using lme4, where the only difference from the call to lm() above is the addition of a term for random intercept by respondent.
+
+Then, the Complete Hierarchical Linear Model.
+
+This part of the choice.hlm2 model is identical to the model estimated for choice.hlm1 above, so the coefficients are identical.The random effects now include an estimate for each parameter for each respondent. Again, because we grouped by resp.id and could have had multiple grouping factors, we request the $resp.id portion of the random effects using ranef().
+
+Notice that the random intercepts are no longer identical to those estimated in model ride.hlm1, because we added seven explanatory variables and the predicted outcome rating points are distributed differently across the predictors.
+
+This concludes our discussion of classical hierarchical models; in the next section, we consider the Bayesian approach to HLM, which uses the same general conceptual model but a different estimation method.
+
+Besides customer-level models, which are most common in marketing, other factors for which one might wish to estimate a hierarchical model include store, country, geographic region, advertising campaign, advertising creative, channel, bundle, and brand.
+
+```{r lm4, echo=FALSE}
+library(lme4)
+choice.hlm1 <- lmer(choice ~ cereal_label + payment + quantity + price + (1 | resp.id), data=cbc.df)
+summary(choice.hlm1)
+head(ranef(choice.hlm1)$resp.id)
+head(coef(choice.hlm1)$resp.id)
+
+
+```
+## Bayesian Hierarchical Linear Models
+
+Hierarchical models may be fit with classical estimation procedures (such as the lme4 package we saw above), yet they are particularly well suited to Bayesian estimation, which gives a best estimate for each individual even when there are few
+individual observations.
+
+The method we use here is known as a hierarchical Bayes approach; hierarchical because it models individuals in relationship to an overarching distribution, and Bayes because it uses Bayesian estimation techniques to fit the models (see Sects. 6.6.1 and 6.6.2 for an introduction).
+
+In this section, we apply a hierarchical Bayes (HB) method to estimate the HLM for ratings-based (metric) conjoint analysis, using the same data set that we analyzed with classical hierarchical models in Sect. 9.3 above. Before continuing this section you should.
+
+We start by estimating a non-hierarchical model, which allows us to check that our basic estimation procedures are working before we attempt a complex model. We model respondents’ ratings of roller coaster designs as a function of roller
+coaster features using MCMCregress() to fit a simple linear model as we did in the section before. As expected, the overall effects are nearly identical to those estimated by the classical linear models in Sect. 9.3.5, so we are ready to add the hierarchical component to the model.
+
+We estimate a hierarchical model using MCMChregress(fixed, random,group, data, r, R). Note the h for hierarchical buried in that function name. 
+
+```{r bayesH, echo=FALSE}
+
+library(MCMCpack)
+set.seed(97439)
+choice.mc1 <- MCMCregress(choice ~ cereal_label + payment + quantity + price, data=cbc.df)
+summary(choice.mc1)
+
+choice.mc2 <- MCMCregress(choice2 ~ cereal_label + payment + quantity + price, data=cbc.df2)
+summary(choice.mc2)
+
+#set.seed(97439)
+#choice.mc3 <- MCMChregress(fixed = choice ~ cereal_label + payment + quantity + price,
+                          #random = ~ cereal_label + payment + quantity + price,
+                          #group="resp.id", data=cbc.df, r=8, R=diag(8))
+ #str(choice.mc3)
+# summary(choice.mc3$mcmc[ ,1:8]) #confidemce pf stimates
+
+```
+
+## Estimating hierarchical bayes choice model with ChoiceModelR
+
+Here we find that the two models make similar share predictions. This illustrates the fact that comparing share predictions is not the ideal way to compare two different conjoint survey designs. When we look at the standard errors for the coefficients, we see the difference between m1 and m4 more clearly. . So, among those who do not use R, it is uncommon to report standard errors or estimates of uncertainty for share predictions.
+
+This is unfortunate; decision makers often see only the point estimates for share predictions and are not informed about the confidence intervals of those shares.An ambitious reader might write code to produce intervals for share predictions
+from the multinomial logit model, but we will hold off on estimating intervals for share predictions until we review choice models in a Bayesian framework. 
+
+Adding Consumer Heterogeneity to Choice Models: Up to this point, we have focused on the multinomial logit model, which estimates a single set of part worth coefficients for a whole sample. In this section, we look at a model that allows for each respondent to have his or her own coefficients. Different people have different preferences, and models that estimate individual-level coefficients can fit data better and make more accurate predictions than sample-level models. 
+
+To estimate a model where each respondent has his or her own part worths, it is helpful to have multiple observations for each respondent. This is not a problem in a typical conjoint analysis study because each respondent answers multiple question.
+
+Most conjoint analysis practitioners routinely estimate heterogeneous choice models with conjoint survey data and it is easy to do this in R. We show how to do it using mlogit, which uses traditional frequentist statistical methods. In addition, we show how to estimate heterogeneous choice models using Bayesian methods.
+
+To estimate both a population-level effect and an individual-level effect, we can use a hierarchical linear model (HLM). The model is hierarchical because it proposes that individual effects follow a distribution across the population.
+In general, a data set for HLM at an individual level needs multiple observations per individual. Such observations may come from responses over time (as in transactions or a customer relationship management system (CRM)) or from multiple
+responses at one time (as in a survey with repeated measures). We consider the case of conjoint analysis, where a respondent rates multiple items on a survey at one time.
+
+A few words of jargon are required. Hierarchical models distinguish two types of effects. One type is fixed effects, which are effects that are the same for every respondent. In a standard linear model (Chap. 7) all effects are fixed effects.
+
+An HLM also estimates random effects, which are additional adjustments to the model coefficients estimated for each individual (or group). These are known as “random” because they are estimated as random variables that follow a distribution around the fixed estimates. However, for the estimate of each individual, they are best estimates according to the model, not random guesses in that sense. This model is known as mixed effect models or multilevel model.
+
+A final variation on mixed effects models is a nested model, where a factor of interest might occur only within subgroups of the total sample.
+
+Then you will see 1. classical linear model and 2. hierarchical model 
+
+
+```{r bayes, echo=FALSE}
+
+choice <- rep(0, nrow(cbc.df))
+choice[cbc.df[,"alt"]==1] <- cbc.df[cbc.df[,"choice"]==1,"alt"]
+head(choice)
+
+cbc.coded <- model.matrix(~ cereal_label + payment + quantity + price, data = cbc.df)
+cbc.coded <- cbc.coded[, -1] # remove the intercept
+
+choicemodelr.data <- cbind(cbc.df[,1:3], cbc.coded, choice)
+head(choicemodelr.data)
+
+cerealpool <- cbc.df$cerealpool[cbc.df$ques==1 & cbc.df$alt==1]=="yes"
+cerealpool <- as.numeric(cerealpool)
+choicemodelr.demos <- as.matrix(cerealpool, nrow=length(cerealpool))
+str(choicemodelr.demos)
+
+library(ChoiceModelR)
+#hb.post <- choicemodelr(data=choicemodelr.data, xcoding=rep(1, 7), 
+                        #demos=choicemodelr.demos, 
+                        #mcmc=list(R=20000, use=10000),
+                        #options=list(save=TRUE))
+
+#names(hb.post)
+
+```
+

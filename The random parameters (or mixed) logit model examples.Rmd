@@ -1,0 +1,91 @@
+---
+title: "The random parameters (or mixed) logit model 06102023"
+author: "Constanza Avalos"
+date: "2023-10-06"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## The random parameters (or mixed) logit model
+
+This code follows the following tutorial: https://cran.r-project.org/web/packages/mlogit/vignettes/c5.mxl.html
+
+We obtain the value of 26 euros for an hour of traveling, 5 euros for a change and 14 euros to travel in a more comfortable class. We then estimate a model with three random parameters, time, change and comfort. We first estimate the uncorrelated mixed logit model.
+
+The presence of random coefficients and their correlation can be investigated using any of the three tests. Actually, three nested models can be considered, a model with no random effects, a model with random but uncorrelated effects and a model with random and correlated effects. We first present the three tests of no correlated random effects.
+
+```{r data}
+library("mlogit")
+data("Train", package = "mlogit")
+Train$choiceid <- 1:nrow(Train)
+Tr <- dfidx(Train, choice = "choice", varying = 4:11, sep = "_",
+            opposite = c("price", "comfort", "time", "change"),
+            idx = list(c("choiceid", "id")), idnames = c("chid", "alt"))
+Tr
+Tr$price <- Tr$price / 100 * 2.20371
+Tr$time <- Tr$time / 60
+Train.ml <- mlogit(choice ~ price + time + change + comfort | - 1, Tr)
+coef(summary(Train.ml))
+
+coef(Train.ml)[- 1] / coef(Train.ml)[1] #we get monetary values
+
+Train.mxlu <- mlogit(choice ~ price + time + change + comfort | - 1, Tr,
+panel = TRUE, rpar = c(time = "n", change = "n", comfort = "n"), R = 100,
+correlation = FALSE, halton = NA, method = "bhhh")
+names(coef(Train.mxlu))
+
+Train.mxlc <- update(Train.mxlu, correlation = TRUE)
+names(coef(Train.mxlc))
+
+marg.ut.time <- rpar(Train.mxlc, "time")
+summary(marg.ut.time)
+
+wtp.time <- rpar(Train.mxlc, "time", norm = "price")
+summary(wtp.time)
+
+#another example
+
+data("RiskyTransport", package = "mlogit")
+RT <- dfidx(RiskyTransport, choice = "choice", idx = list(c("chid", "id"), "mode"),
+            idnames = c("chid", "alt"))
+ml.rt <- mlogit(choice ~ cost + risk  + seats + noise + crowdness + convloc + clientele | 0, data = RT, weights = weight)
+summary(ml.rt)
+
+mx.rt <- mlogit(choice ~ cost + risk  + seats + noise + crowdness + convloc + clientele | 0, data = RT, weights = weight,
+rpar = c(cost = 'zbt', risk = 'zbt'), R = 100, halton = NA, panel = TRUE)
+summary(mx.rt)
+
+indpar <- fitted(mx.rt, type = "parameters")
+head(indpar)
+
+indpar$VSL <- with(indpar, risk / cost * 100)
+quantile(indpar$VSL, c(0.025, 0.975))
+mean(indpar$VSL)
+max(indpar$cost)
+max(indpar$VSL)
+
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r results='asis', echo=FALSE}
+
+library(texreg)
+htmlreg(list('Multinomial logit' = ml.rt, 'Mixed logit' = mx.rt),digits = 3, float.pos = "hbt", label = "tab:risktr", single.row = TRUE, caption = "Transportation choices.")
+
+library("ggplot2")
+RT$id <- RT$id
+indpar <- merge(unique(subset(as.data.frame(RT),
+                              select = c("id", "african"))),
+                indpar)
+ggplot(indpar) + geom_density(aes(x = VSL, linetype = african)) + 
+    scale_x_continuous(limits = c(200, 1200))
+
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.

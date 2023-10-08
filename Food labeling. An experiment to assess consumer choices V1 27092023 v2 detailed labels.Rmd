@@ -1,0 +1,196 @@
+---
+title: "Food labelling. An experiment to assess consumer choices."
+author: "Constanza Avalos"
+date: "2023-09-27"
+output: 
+  html_document:
+    theme: cerulean
+    toc: yes
+    toc_float: yes
+  pdf_document:
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Data Transformation for DCE Analysis Using R
+
+This codes follow the book "Discrete Choice Experiments Using R", link https://link-springer-com.manchester.idm.oclc.org/chapter/10.1007/978-981-99-4562-7_9. 
+
+We used the package support.CEs to generate the experimental design for our demonstrative project, and thus the design matrix that we need for model estimation can be created using the following R codes. 
+
+After launching the package support.CEs, we may then start designing our DCE with the assistance of the R package. We will demonstrate an example of an unlabeled DCE design. In this project, we have a total of 4 attributes. One of them have four attribute levels, and two of them has two attribute levels, and one with three levels.
+
+We wish to present our respondents with two alternative products plus the option “Neither of them”, and thus we will set the number of alternatives as 2 in the code. To design an unlabeled DCE, we will utilize the function rotation.design() with the arguments assigned to the abovementioned conditions by typing and executing codes as follows:
+
+df <- read.csv("C:\\Users\\const\\OneDrive\\Desktop\\PhD\\R\\First paper\\docs\\CsvAllFields160923coarse.csv", header = TRUE, as.is = TRUE) #call the dataset
+
+library(support.CEs)
+
+unlabeled <- rotation.design(
+  attribute.names = list(Labels = c("Very low", "Low", "High", "Very high"),
+                         Boost immune system = c("Yes", "No"),
+                         Reinforced in fibre = c("Yes", "No"),
+                         Price = c(2.75, 3, 3.25)), 
+  nalternatives = 2,
+  nblocks = 1,
+  row.renames = FALSE, 
+  seed = 987, 
+  randomize = TRUE)
+
+The function rotation.design() generates a total of 24 choice sets, each with two alternatives. The printed output indicates attribute levels involved in each alternative and thus can be utilized for constructing the DCE questionnaire. The output suggests that each respondent will have to answer a total of 24 choice experiment questions.
+
+
+```{r data, echo=FALSE}
+
+df <- read.csv("C:\\Users\\const\\OneDrive\\Desktop\\PhD\\R\\First paper\\docs\\CsvAllFields160923detailed.csv", header = TRUE, as.is = TRUE) #call the dataset
+
+library(support.CEs)
+
+unlabeled <- rotation.design(
+  attribute.names = list(Labels = c("Very low", "Low", "Medium", "High", "Very High"),
+                         Boost_immune_system = c("Yes", "No"),
+                         Price = c(2.75, 3, 3.25)), 
+  nalternatives = 2,
+  nblocks = 1,
+  row.renames = FALSE, 
+  seed = 987, 
+  randomize = TRUE)
+
+unlabeled
+
+```
+# Using R Packages for Model Estimation
+
+The design matrix that we need for model estimation can be created using the following R code. This experimental desing has 24 options, equal to 3 attributes with 5, 2 and 3 levels, 5 x 2 x 3 = 30 options. 
+
+desmat2 <- make.design.matrix(choice.experiment.design = unlabeled, optout = TRUE, 
+                              categorical.attributes = c("Labels", "Boost_immune_system"), 
+                              continuous.attributes = c("Price"), 
+                              unlabeled = TRUE) ##unlabeled refers to our experimental design generated using the function rotation.design().
+
+dataset2 <- make.dataset(respondent.dataset = df, 
+                         choice.indicators = c("CBC_Random1", "CBC_Random2", "CBC_Random3", "CBC_Random4", 
+                                               "CBC_Random5", "CBC_Random6", "CBC_Random7", "CBC_Random8", 
+                                               "CBC_Random9", "CBC_Random10", "CBC_Random11", "CBC_Random12", 
+                                               "CBC_Random13", "CBC_Random14", "CBC_Random15"), 
+                         design.matrix = desmat2)
+
+```{r model, echo=FALSE}
+
+desmat2 <- make.design.matrix(choice.experiment.design = unlabeled, optout = TRUE, 
+                              categorical.attributes = c("Labels", "Boost_immune_system"), 
+                              continuous.attributes = c("Price"), 
+                              unlabeled = TRUE) ##unlabeled refers to our experimental design generated using the function rotation.design().
+
+
+dataset2 <- make.dataset(respondent.dataset = df, 
+                         choice.indicators = c("CBC3_Random1", "CBC3_Random2", "CBC3_Random3", "CBC3_Random4", 
+                                               "CBC3_Random5", "CBC3_Random6", "CBC3_Random7", "CBC3_Random8", 
+                                               "CBC3_Random9", "CBC3_Random10", "CBC3_Random11", "CBC3_Random12", 
+                                               "CBC3_Random13", "CBC3_Random14", "CBC3_Random15"), 
+                         design.matrix = desmat2)
+head(dataset2, 10)
+
+```
+
+# Logit Analysis Using clogit Function
+
+After the data set is also converted and ready for use and saved in the object dataset2, we can then use the function clogit() in the package survival for model estimation. 
+
+The function clogit() returns estimated coefficients about a DCE model and the Likelihood ratio test. However, it does not measure the goodness of fit. Unlike the linear regression model, there is no single measure for the goodness of fit in discrete choice models. The most commonly used measure of goodness of fit is the McFadden R2, also known as pseudo R2. When the value of the McFadden R2 equals 1, it means that the respondent’s choice can be perfectly predicted. Nonetheless, the measure can never reach 1.
+
+```{r clogit, echo=FALSE}
+
+library(survival)
+
+#fist approach clogit + i can add sociodemographic variables
+
+output1 <- clogit(RES ~ ASC + Low + Medium + High + Very.High + No + Price + strata(STR), data = dataset2)
+summary(output1)
+
+#Generating Goodness of Fit Results Using gofm() Function
+
+gofm(output1) # When the value of the McFadden R2 equals 1, it means that the respondent’s choice can be perfectly predicted
+
+```
+# Logit Analysis Using mlogit Function
+
+Multinomial logistic regression
+
+```{r mlogit, echo=FALSE}
+
+output2 <- coxph(Surv(ID, RES) ~ Low + Medium + High + Very.High + No + Price, data = dataset2,
+                 ties = "breslow")
+summary(output2)
+
+#probability of choices for each of the 24 options
+#predict(output2)
+#exp_p <- cbind(dataset2$ALT, data.frame(exp(predict(output1))))[1:24, ]
+#names(exp_p)[1] <- "Alt"
+#names(exp_p)[2] <- "Exp"
+#exp_p$prob <- exp_p$Exp / sum(exp_p$Exp)
+#exp_p[c(order(-exp_p$prob)),]
+
+
+library(mlogit)
+dataset3 <- mlogit.data(data=dataset2, choice = "RES", shape = "long", alt.var = "ALT", id.var = "ID")
+output3 <- mlogit(RES ~ 0 + Low + Medium + High + Very.High + No + Price, data = dataset3)
+summary(output3)
+
+
+```
+## Estimating the Willingness to Pay of Non-monetary Attributes
+
+This analysis is also show the attribute trade-off analysis or marginal willingness to pay (MWTP) analysis. For example, if the coefficient of the “High label” attribute in a DCE model is 0.08, and the coefficient of the “price” attribute is -0.34, then the MWTP for the “Low label” attribute would be -0.09/0.34= -0.26, indicating that respondents are willing to pay an additional \$0.26 for the product with the Low label compared to a product without one. For the last variable, participants respondents are willing to pay an additional \$0.20 for the product with that no boost immune system compared to a product without one
+
+```{r willigness, echo=FALSE}
+
+mwtp(output = output1, monetary.variables = c("Price"), 
+     nonmonetary.variables = c("Low", "Medium", "High", "Very.High", "No"),
+     confidence.level = c(0.9), seed = 987) 
+
+```
+
+## Plotting
+
+```{r plot, echo=FALSE}
+
+library(ggplot2)
+clogitmodel <- clogit(RES ~ ASC + Low + Medium + High + Very.High + No + Price + strata(STR), data = dataset2)
+
+#extract the coefficients
+coefs <- coef(clogitmodel)[2:7] #remove ASC from the coefficients
+
+#plot the coefficients as a bar chat
+ggplot(data.frame(attribute = names(coefs), coef= coefs), aes(x = attribute, y = coef)) +
+  geom_bar(stat = "identity") +
+  xlab("Attribute") +
+  ylab("Coefficient") +
+  ggtitle("Coefficient of Conditional Logit Model")
+
+#relative importance of attributes
+attribute_names <- c("Labels", "Boost immune system", "Price") #here, we replaced the attribute level names with actual attribute names for easier understanding
+
+relative_importance <- exp(coefs)
+#df <- data.frame(attribute = attribute_names, importance = relative_importance)
+
+#ggplot(df, aes(x = attribute, y = importance)) +
+  #geom_bar(stat = "identity") +
+  #ggtitle("Relative Importance of Attributes") +
+  #xlab("Attribute") +
+  #ylab("Relative Importance")
+
+```
+## Tables
+
+Showing the models in one table.
+
+```{r results='asis'}
+
+library(stargazer)
+stargazer(output1, type = "html", out = "coefs.html")
+
+```
